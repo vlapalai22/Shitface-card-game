@@ -4,21 +4,20 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { WebSocket, WebSocketServer } from 'ws';
-import {
-  ALLOWED_REACTION_EMOJIS,
+import { ALLOWED_REACTION_EMOJIS } from './src/shared/types.ts';
+import type {
   ChatMessage,
   ClientWsMessage,
   ReactionEvent,
   ServerWsMessage,
 } from './src/shared/types.ts';
 import {
-  LeaderboardSort,
   ensurePlayerProfile,
   getLeaderboard,
   getPlayerProfile,
 } from './src/server/db.ts';
+import type { LeaderboardSort } from './src/server/db.ts';
 import {
-  ServerRoomState,
   addOrReconnectPlayer,
   createRoom,
   generateRoomCode,
@@ -30,6 +29,7 @@ import {
   startDeal,
   swapOpeningCard,
 } from './src/server/palaceEngine.ts';
+import type { ServerRoomState } from './src/server/palaceEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -1,8 +1,13 @@
 import Database from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
 import type { LeaderboardEntry, MatchStanding } from '../shared/types.ts';
 
-const DB_PATH = path.resolve(process.cwd(), 'palace_salon.db');
+const DB_PATH = process.env.DB_PATH
+  ? path.resolve(process.env.DB_PATH)
+  : path.resolve(process.cwd(), 'palace_salon.db');
+
+fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
