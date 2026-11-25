@@ -47,15 +47,15 @@ const SIZE_CLASSES: Record<
   }
 > = {
   xs: {
-    frame: 'w-11 h-16 rounded-md',
-    rank: 'text-[11px] leading-none',
+    frame: 'w-12 h-[68px] sm:w-[50px] sm:h-[72px] rounded-md',
+    rank: 'text-xs leading-none',
     cornerSuit: 'text-[10px] leading-none',
     centerSuit: 'text-lg leading-none',
     special: 'text-[7px] tracking-wider',
   },
   sm: {
-    frame: 'w-14 h-20 rounded-lg',
-    rank: 'text-xs leading-none',
+    frame: 'w-14 h-20 sm:w-[62px] sm:h-[88px] rounded-lg',
+    rank: 'text-xs sm:text-[13px] leading-none',
     cornerSuit: 'text-[11px] leading-none',
     centerSuit: 'text-2xl leading-none',
     special: 'text-[8px] tracking-wider',
@@ -81,6 +81,7 @@ interface PlayingCardProps {
   faceDown?: boolean;
   size?: CardSize;
   selected?: boolean;
+  queued?: boolean;
   playable?: boolean;
   dimmed?: boolean;
   interactive?: boolean;
@@ -95,6 +96,7 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
   faceDown = false,
   size = 'md',
   selected = false,
+  queued = false,
   playable = false,
   dimmed = false,
   interactive = false,
@@ -110,13 +112,18 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
     ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4AF37] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0B3B24]'
     : 'cursor-default';
 
+  const isCompact = size === 'xs' || size === 'sm';
   const elevationClass = selected
-    ? '-translate-y-4 ring-2 ring-[#D4AF37] shadow-[0_14px_28px_rgba(0,0,0,0.55)]'
-    : playable && interactive
-      ? 'hover:-translate-y-2.5 ring-1 ring-[#D4AF37]/75 shadow-[0_8px_18px_rgba(0,0,0,0.42)]'
-      : 'shadow-[0_6px_14px_rgba(0,0,0,0.38)]';
+    ? `${isCompact ? '-translate-y-2' : '-translate-y-3.5'} ring-2 ring-[#D4AF37] shadow-[0_10px_22px_rgba(212,175,55,0.32)]`
+    : queued
+      ? `${isCompact ? '-translate-y-2' : '-translate-y-3'} ring-2 ring-emerald-400 shadow-[0_10px_22px_rgba(16,185,129,0.38)]`
+      : playable && interactive
+        ? `${isCompact ? 'hover:-translate-y-1.5' : 'hover:-translate-y-2.5'} ring-1 ring-[#D4AF37]/75 shadow-[0_8px_18px_rgba(0,0,0,0.42)]`
+        : interactive
+          ? `${isCompact ? 'hover:-translate-y-1' : 'hover:-translate-y-1.5'} hover:ring-1 hover:ring-emerald-400/70 shadow-[0_6px_14px_rgba(0,0,0,0.38)]`
+          : 'shadow-[0_6px_14px_rgba(0,0,0,0.38)]';
 
-  const opacityClass = dimmed ? 'opacity-50 saturate-50' : 'opacity-100';
+  const opacityClass = dimmed ? 'opacity-45 saturate-50' : 'opacity-100';
 
   if (faceDown || !card) {
     const content = (
@@ -175,6 +182,11 @@ export const PlayingCard: React.FC<PlayingCardProps> = ({
     <div
       className={`relative select-none border transition-transform duration-150 ease-out ${styles.frame} ${specialSurface} ${elevationClass} ${opacityClass} ${baseInteractive} ${className}`}
     >
+      {queued && (
+        <span className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 z-20 px-1.5 py-0.5 rounded bg-emerald-500 text-[#061A11] font-mono text-[8px] font-bold tracking-wider uppercase shadow-sm leading-none">
+          AUTO
+        </span>
+      )}
       {/* Top-left rank + suit */}
       <div className={`absolute top-1.5 left-1.5 flex flex-col items-center font-bold ${suitColor}`}>
         <span className={styles.rank}>{card.rank}</span>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -16,6 +16,8 @@ import {
   Trophy,
   Volume2,
   VolumeX,
+  X,
+  Zap,
 } from 'lucide-react';
 import {
   Card,
@@ -206,6 +208,11 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
 
   // Selection state for PLAYING multi-card plays
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
+  // Queued predicted auto-play (premove) while waiting for opponent's turn
+  const [queuedCardIds, setQueuedCardIds] = useState<string[]>([]);
+  const [premoveFailedNotice, setPremoveFailedNotice] = useState<string | null>(null);
+  const prevIsMyTurnRef = useRef<boolean>(false);
+  const lastAutoPlayedTurnKeyRef = useRef<string | null>(null);
   // Selection state for SWAPPING phase
   const [swapHandId, setSwapHandId] = useState<string | null>(null);
   const [swapFaceUpIdx, setSwapFaceUpIdx] = useState<number | null>(null);
@@ -240,6 +247,7 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
   useEffect(() => {
     if (!me) {
       setSelectedCardIds([]);
+      setQueuedCardIds([]);
       setSwapHandId(null);
       setSwapFaceUpIdx(null);
       return;
@@ -249,15 +257,76 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
       ...me.faceUp.filter((c): c is Card => c !== null).map((c) => c.id),
     ]);
     setSelectedCardIds((prev) => prev.filter((id) => validIds.has(id)));
+    setQueuedCardIds((prev) => prev.filter((id) => validIds.has(id)));
     if (swapHandId && !validIds.has(swapHandId)) {
       setSwapHandId(null);
     }
   }, [me, room.phase, room.currentTurnPlayerId, swapHandId]);
 
-  // Clear selections when leaving turn or swapping
+  // Clear selections and failed premove notice when leaving turn
   useEffect(() => {
-    if (!isMyTurn) setSelectedCardIds([]);
+    if (!isMyTurn) {
+      setSelectedCardIds([]);
+      setPremoveFailedNotice(null);
+    }
   }, [isMyTurn]);
+
+  // Auto-play queued predicted card(s) the instant it becomes your turn if legal;
+  // otherwise clear the queue and prompt the player to re-choose.
+  useEffect(() => {
+    const wasMyTurn = prevIsMyTurnRef.current;
+    prevIsMyTurnRef.current = isMyTurn;
+
+    if (room.phase !== 'PLAYING') {
+      setQueuedCardIds([]);
+      setPremoveFailedNotice(null);
+      lastAutoPlayedTurnKeyRef.current = null;
+      return;
+    }
+
+    if (!wasMyTurn && isMyTurn && queuedCardIds.length > 0 && me) {
+      const turnKey = `${room.matchNumber}-${room.lastPlay?.timestamp ?? 0}-${room.discardPile.length}`;
+      if (lastAutoPlayedTurnKeyRef.current === turnKey) return;
+
+      const pool =
+        myZone === 'HAND'
+          ? myHand
+          : myZone === 'FACE_UP'
+            ? me.faceUp.filter((c): c is Card => c !== null)
+            : [];
+      const validQueued = pool.filter((c) => queuedCardIds.includes(c.id));
+
+      setQueuedCardIds([]);
+
+      if (validQueued.length > 0) {
+        const rank = validQueued[0].rank;
+        const allSameRank = validQueued.every((c) => c.rank === rank);
+        if (allSameRank && isRankPlayableOnPile(rank, room.discardPile)) {
+          lastAutoPlayedTurnKeyRef.current = turnKey;
+          setPremoveFailedNotice(null);
+          onPlayCards(validQueued.map((c) => c.id));
+        } else {
+          const topRank = room.discardPile[room.discardPile.length - 1]?.rank;
+          setPremoveFailedNotice(
+            topRank === '7'
+              ? `Queued ${rank} can't play on a 7 — choose 7 or lower (or 2 / 10).`
+              : `Queued ${rank} couldn't beat ${topRank ?? 'the pile'} — choose another card.`
+          );
+        }
+      }
+    }
+  }, [
+    isMyTurn,
+    room.phase,
+    room.matchNumber,
+    room.lastPlay?.timestamp,
+    room.discardPile,
+    queuedCardIds,
+    me,
+    myZone,
+    myHand,
+    onPlayCards,
+  ]);
 
   useEffect(() => {
     if (room.phase !== 'SWAPPING') {
@@ -312,6 +381,46 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
     return pool.filter((c) => selectedCardIds.includes(c.id));
   }, [me, selectedCardIds, myZone, myHand]);
 
+  const matchingRankCards: Card[] = useMemo(() => {
+    if (!me || selectedCards.length === 0) return [];
+    const targetRank = selectedCards[0].rank;
+    const pool =
+      myZone === 'HAND'
+        ? myHand
+        : me.faceUp.filter((c): c is Card => c !== null);
+    return pool.filter((c) => c.rank === targetRank);
+  }, [me, selectedCards, myZone, myHand]);
+
+  const canQueuePremove =
+    room.phase === 'PLAYING' &&
+    !isMyTurn &&
+    (myZone === 'HAND' || myZone === 'FACE_UP');
+
+  const queuedCards: Card[] = useMemo(() => {
+    if (!me || queuedCardIds.length === 0) return [];
+    const pool =
+      myZone === 'HAND'
+        ? myHand
+        : me.faceUp.filter((c): c is Card => c !== null);
+    return pool.filter((c) => queuedCardIds.includes(c.id));
+  }, [me, queuedCardIds, myZone, myHand]);
+
+  const matchingQueuedRankCards: Card[] = useMemo(() => {
+    if (!me || queuedCards.length === 0) return [];
+    const targetRank = queuedCards[0].rank;
+    const pool =
+      myZone === 'HAND'
+        ? myHand
+        : me.faceUp.filter((c): c is Card => c !== null);
+    return pool.filter((c) => c.rank === targetRank);
+  }, [me, queuedCards, myZone, myHand]);
+
+  const handCardSize =
+    myHand.length >= 17 ? 'xs' : myHand.length >= 8 ? 'sm' : 'md';
+  const compactPalace =
+    room.phase === 'PLAYING' && myZone === 'HAND' && myHand.length >= 8;
+  const palaceCardSize = compactPalace ? 'sm' : 'md';
+
   const handleCopyInviteClick = () => {
     onCopyInvite();
     setCopiedJustNow(true);
@@ -345,6 +454,7 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
   const handlePlayCardClick = (card: Card) => {
     if (!isMyTurn) return;
     if (!isRankPlayableOnPile(card.rank, room.discardPile)) return;
+    setPremoveFailedNotice(null);
 
     setSelectedCardIds((prev) => {
       if (prev.includes(card.id)) {
@@ -366,15 +476,39 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
     });
   };
 
+  // Off-turn predicted auto-play (premove) toggle (supports same-rank multi-card queues)
+  const handleQueueCardClick = (card: Card) => {
+    if (!canQueuePremove) return;
+    setQueuedCardIds((prev) => {
+      if (prev.includes(card.id)) {
+        return prev.filter((id) => id !== card.id);
+      }
+      if (prev.length === 0) {
+        return [card.id];
+      }
+      const pool =
+        myZone === 'HAND'
+          ? myHand
+          : (me?.faceUp.filter((c): c is Card => c !== null) ?? []);
+      const firstQueued = pool.find((c) => c.id === prev[0]);
+      if (firstQueued && firstQueued.rank === card.rank) {
+        return [...prev, card.id];
+      }
+      return [card.id];
+    });
+  };
+
   const handlePlayCardDoubleClick = (card: Card) => {
     if (!isMyTurn) return;
     if (!isRankPlayableOnPile(card.rank, room.discardPile)) return;
+    setPremoveFailedNotice(null);
     setSelectedCardIds([]);
     onPlayCards([card.id]);
   };
 
   const handleConfirmPlay = () => {
     if (!isMyTurn || selectedCardIds.length === 0) return;
+    setPremoveFailedNotice(null);
     onPlayCards(selectedCardIds);
     setSelectedCardIds([]);
   };
@@ -835,37 +969,97 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
 
           {/* BOTTOM ZONE: CURRENT PLAYER PALACE + HAND + ACTION BAR */}
           {me && (
-            <div className="relative z-20 mt-auto pt-2 flex flex-col items-center gap-3">
+            <div className="relative z-20 mt-auto pt-2 flex flex-col items-center gap-2.5">
               {/* Self Floating Reaction */}
-              <div className="relative w-full max-w-3xl flex flex-col items-center">
+              <div className="relative w-full max-w-6xl flex flex-col items-center">
                 <FloatingReactionBubble
                   reaction={latestReactionByPlayer.get(currentPlayerId)}
                 />
 
-                {/* Turn Status + Action Controls + Quick Mock Bar */}
+                {/* Turn Status + Action Controls + Queued Auto-Play Bar */}
                 {room.phase === 'PLAYING' && (
-                  <div className="w-full flex flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 rounded-xl bg-[#0B1B13]/92 border border-[#D4AF37]/25 shadow-lg mb-3">
-                    {/* Turn Indicator */}
+                  <div className="w-full max-w-4xl flex flex-wrap items-center justify-between gap-2.5 px-4 py-2 rounded-xl bg-[#0B1B13]/92 border border-[#D4AF37]/25 shadow-lg mb-2.5">
+                    {/* Turn / Premove Indicator */}
                     <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`text-xs sm:text-sm font-semibold ${
-                          isMyTurn ? 'text-[#D4AF37]' : 'text-[#A8B6AD]'
-                        }`}
-                      >
-                        {isMyTurn
-                          ? myZone === 'FACE_DOWN'
-                            ? 'Your Turn · Flip a Blind Palace Card'
-                            : myZone === 'FACE_UP'
-                              ? 'Your Turn · Play from Face-Up Palace'
-                              : hasAnyLegalPlay
-                                ? 'Your Turn · Select matching cards to play'
-                                : 'Your Turn · No playable card — Pick Up Pile'
-                          : `Waiting for ${currentTurnName}...`}
-                      </span>
+                      {isMyTurn && premoveFailedNotice ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-amber-300">
+                          <AlertTriangle className="w-4 h-4 shrink-0" />
+                          <span>{premoveFailedNotice}</span>
+                        </span>
+                      ) : !isMyTurn && queuedCards.length > 0 ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-emerald-300">
+                          <Zap className="w-4 h-4 shrink-0" />
+                          <span>
+                            Auto-Play Queued:{' '}
+                            {queuedCards.length > 1
+                              ? `${queuedCards.length}× ${queuedCards[0].rank}`
+                              : queuedCards[0].rank}{' '}
+                            · Waiting for {currentTurnName}
+                          </span>
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-xs sm:text-sm font-semibold ${
+                            isMyTurn ? 'text-[#D4AF37]' : 'text-[#A8B6AD]'
+                          }`}
+                        >
+                          {isMyTurn
+                            ? myZone === 'FACE_DOWN'
+                              ? 'Your Turn · Flip a Blind Palace Card'
+                              : myZone === 'FACE_UP'
+                                ? 'Your Turn · Play from Face-Up Palace'
+                                : hasAnyLegalPlay
+                                  ? 'Your Turn · Select matching cards to play'
+                                  : 'Your Turn · No playable card — Pick Up Pile'
+                            : canQueuePremove
+                              ? `Waiting for ${currentTurnName}... · Click a card to queue auto-play`
+                              : `Waiting for ${currentTurnName}...`}
+                        </span>
+                      )}
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {!isMyTurn &&
+                        queuedCards.length > 0 &&
+                        matchingQueuedRankCards.length > queuedCards.length && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setQueuedCardIds(matchingQueuedRankCards.map((c) => c.id))
+                            }
+                            className="px-3 py-2 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-400/50 text-xs font-semibold text-emerald-200 transition-colors whitespace-nowrap"
+                          >
+                            Queue All {queuedCards[0].rank}s ({matchingQueuedRankCards.length})
+                          </button>
+                        )}
+
+                      {!isMyTurn && queuedCards.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setQueuedCardIds([])}
+                          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-[#FAF7F0] transition-colors whitespace-nowrap"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Cancel Auto-Play</span>
+                        </button>
+                      )}
+
+                      {isMyTurn &&
+                        myZone !== 'FACE_DOWN' &&
+                        selectedCards.length > 0 &&
+                        matchingRankCards.length > selectedCards.length && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedCardIds(matchingRankCards.map((c) => c.id))
+                            }
+                            className="px-3 py-2 rounded-lg bg-[#1A382A] hover:bg-[#234A37] border border-[#D4AF37]/40 text-xs font-semibold text-[#FAF7F0] transition-colors whitespace-nowrap"
+                          >
+                            Select All {selectedCards[0].rank}s ({matchingRankCards.length})
+                          </button>
+                        )}
+
                       {myZone !== 'FACE_DOWN' && (
                         <button
                           type="button"
@@ -885,7 +1079,10 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={onPickupPile}
+                        onClick={() => {
+                          setPremoveFailedNotice(null);
+                          onPickupPile();
+                        }}
                         disabled={!isMyTurn || room.discardPile.length === 0}
                         className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap disabled:opacity-35 disabled:cursor-not-allowed ${
                           isMyTurn && !hasAnyLegalPlay && room.discardPile.length > 0
@@ -900,12 +1097,18 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                   </div>
                 )}
 
-                {/* Player's 3 Palace Stacks (Face-Down under Face-Up) + Hand */}
+                {/* Player's 3 Palace Stacks (Face-Down under Face-Up) + Adaptive Wrapped Hand */}
                 {room.phase !== 'WAITING' && (
-                  <div className="w-full flex flex-col lg:flex-row items-center justify-center gap-5 lg:gap-8">
+                  <div
+                    className={`w-full flex items-center justify-center ${
+                      myHand.length >= 12
+                        ? 'flex-col-reverse gap-3'
+                        : 'flex-col lg:flex-row gap-4 lg:gap-6'
+                    }`}
+                  >
                     {/* 3 Palace Slots */}
-                    <div className="flex flex-col items-center gap-1.5 shrink-0">
-                      <div className="flex items-center gap-2.5">
+                    <div className="flex flex-col items-center gap-1 shrink-0">
+                      <div className={`flex items-center ${compactPalace ? 'gap-1.5' : 'gap-2.5'}`}>
                         {[0, 1, 2].map((slotIdx) => {
                           const upCard = me.faceUp[slotIdx];
                           const hasDown = me.faceDownSlots[slotIdx];
@@ -921,13 +1124,22 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                           const isFaceUpSelected =
                             upCard !== null && selectedCardIds.includes(upCard.id);
 
+                          const canQueueFaceUp =
+                            canQueuePremove && myZone === 'FACE_UP' && upCard !== null;
+                          const isFaceUpQueued =
+                            upCard !== null && queuedCardIds.includes(upCard.id);
+
                           const canFlipBlind =
                             isMyTurn && myZone === 'FACE_DOWN' && !upCard && hasDown;
 
                           return (
                             <div
                               key={slotIdx}
-                              className="relative w-[74px] h-[108px] sm:w-[82px] sm:h-[120px] flex items-center justify-center"
+                              className={`relative flex items-center justify-center ${
+                                compactPalace
+                                  ? 'w-14 h-[82px] sm:w-[62px] sm:h-[90px]'
+                                  : 'w-[74px] h-[108px] sm:w-[82px] sm:h-[120px]'
+                              }`}
                             >
                               {!upCard && !hasDown ? (
                                 <div className="w-full h-full rounded-lg border border-dashed border-white/15 flex items-center justify-center text-[10px] text-white/35">
@@ -940,13 +1152,13 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                                     <div
                                       className={
                                         upCard
-                                          ? 'absolute top-1.5 left-1 opacity-90 pointer-events-none'
+                                          ? 'absolute top-1 left-1 opacity-90 pointer-events-none'
                                           : 'relative z-10'
                                       }
                                     >
                                       <PlayingCard
                                         faceDown
-                                        size="md"
+                                        size={palaceCardSize}
                                         interactive={canFlipBlind}
                                         playable={canFlipBlind}
                                         onClick={() => canFlipBlind && onFlipFaceDown(slotIdx)}
@@ -960,9 +1172,10 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                                     <div className="relative z-10 -translate-y-1">
                                       <PlayingCard
                                         card={upCard}
-                                        size="md"
-                                        interactive={canSwapHere || canPlayFaceUp}
+                                        size={palaceCardSize}
+                                        interactive={canSwapHere || canPlayFaceUp || canQueueFaceUp}
                                         selected={isSwapTarget || isFaceUpSelected}
+                                        queued={isFaceUpQueued}
                                         playable={canSwapHere || canPlayFaceUp}
                                         dimmed={
                                           isMyTurn &&
@@ -974,6 +1187,8 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                                             handleSwapFaceUpClick(slotIdx);
                                           } else if (canPlayFaceUp) {
                                             handlePlayCardClick(upCard);
+                                          } else if (canQueueFaceUp) {
+                                            handleQueueCardClick(upCard);
                                           }
                                         }}
                                         onDoubleClick={() => {
@@ -995,8 +1210,8 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Player's Hand */}
-                    <div className="flex flex-col items-center gap-1.5 min-w-0 max-w-full">
+                    {/* Player's Hand — Adaptive Shrinking Multi-Row Grid (Zero Scrollbar) */}
+                    <div className="flex-1 flex flex-col items-center gap-1.5 min-w-0 w-full">
                       {myHand.length === 0 ? (
                         <div className="h-[118px] px-6 rounded-xl border border-dashed border-white/15 flex items-center justify-center text-xs text-[#A8B6AD]">
                           {myZone === 'FACE_UP'
@@ -1006,39 +1221,41 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                               : 'All cards cleared!'}
                         </div>
                       ) : (
-                        <div className="flex items-end justify-center overflow-x-auto max-w-full pt-5 pb-1 px-3">
-                          {myHand.map((card, idx) => {
+                        <div
+                          className={`w-full flex flex-wrap items-end justify-center pt-2.5 pb-1 px-1 ${
+                            handCardSize === 'xs'
+                              ? 'gap-x-1 gap-y-2'
+                              : handCardSize === 'sm'
+                                ? 'gap-x-1.5 gap-y-2.5'
+                                : 'gap-x-2 gap-y-2.5'
+                          }`}
+                        >
+                          {myHand.map((card) => {
                             const canSwap = room.phase === 'SWAPPING' && !me.ready;
                             const canPlay =
                               isMyTurn &&
                               myZone === 'HAND' &&
                               isRankPlayableOnPile(card.rank, room.discardPile);
+                            const canQueueHand = canQueuePremove && myZone === 'HAND';
                             const isSelected =
                               room.phase === 'SWAPPING'
                                 ? swapHandId === card.id
                                 : selectedCardIds.includes(card.id);
-
-                            const overlapClass =
-                              idx === 0
-                                ? ''
-                                : myHand.length > 8
-                                  ? '-ml-9 sm:-ml-8'
-                                  : myHand.length > 5
-                                    ? '-ml-6 sm:-ml-5'
-                                    : '-ml-2 sm:-ml-1.5';
+                            const isQueued = queuedCardIds.includes(card.id);
 
                             return (
                               <div
                                 key={card.id}
-                                className={`${overlapClass} transition-all duration-150 hover:z-30 ${
-                                  isSelected ? 'z-20' : 'z-10'
+                                className={`transition-transform duration-150 hover:z-30 ${
+                                  isSelected || isQueued ? 'z-20' : 'z-10'
                                 }`}
                               >
                                 <PlayingCard
                                   card={card}
-                                  size="md"
-                                  interactive={canSwap || canPlay}
+                                  size={handCardSize}
+                                  interactive={canSwap || canPlay || canQueueHand}
                                   selected={isSelected}
+                                  queued={isQueued}
                                   playable={canSwap || canPlay}
                                   dimmed={isMyTurn && myZone === 'HAND' && !canPlay}
                                   onClick={() => {
@@ -1046,6 +1263,8 @@ export const GameTableView: React.FC<GameTableViewProps> = ({
                                       handleSwapHandClick(card);
                                     } else if (canPlay) {
                                       handlePlayCardClick(card);
+                                    } else if (canQueueHand) {
+                                      handleQueueCardClick(card);
                                     }
                                   }}
                                   onDoubleClick={() => {
