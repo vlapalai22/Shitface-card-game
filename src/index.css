@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg-salon: #0B1410;
+  --surface-salon: #12211A;
+  --surface-elevated: #182C23;
+  --table-felt: #0D422A;
+  --card-ivory: #FAF7F0;
+  --brass: #D4AF37;
+  --brass-muted: rgba(212, 175, 55, 0.24);
+  --turn-emerald: #10B981;
+  --seven-amber: #F59E0B;
+  --suit-crimson: #C81E2B;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-salon);
+  color: #F4F1EA;
+  overflow-x: hidden;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom subtle scrollbars for chat and leaderboard */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(11, 20, 16, 0.4);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.28);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.48);
+}
+
+@keyframes floatReaction {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.84);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(0px) scale(1.04);
+  }
+  28% {
+    transform: translateY(-2px) scale(1);
+  }
+  82% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-22px) scale(0.94);
+  }
+}
+
+.animate-float-reaction {
+  animation: floatReaction 3.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-reaction {
+    animation: none;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Royal Salon Palace",
+  "description": "Real-time multiplayer Palace card game with Special 7 rules, private shareable tables, live emoji-taunt chat, and a global leaderboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
